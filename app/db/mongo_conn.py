@@ -12,3 +12,5 @@ db = client.twitter_clone
 # ================== Users collections ============
 userCollection = db.users
 userCircleCollection = db.userCircles
+postCollection = db.posts
+postUserCollection = db.postUsers
