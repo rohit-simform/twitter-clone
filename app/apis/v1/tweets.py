@@ -1,11 +1,12 @@
 # app/api/api_v1/endpoints/tweets.py
-from fastapi import APIRouter, Request, HTTPException, status
+from fastapi import APIRouter, Request, HTTPException, status, BackgroundTasks
 
 from app.models.tweet import NewTweetPayload, Post, PostUser, TweetFeedPayload
 from app.models.user import UserCircle
+from app.utils.async_process import add_users_timeline
 from app.utils.utils import verify_token
 from bson import ObjectId
-
+from datetime import datetime
 
 from app.db.mongo_conn import userCollection, postCollection, postUserCollection, userCircleCollection
 
@@ -62,16 +63,22 @@ async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
 
     print(filteredUsers)
 
-    # fetch tweets or filter tweets
-    if fromDate:
-        # Find documents where userId is in the filteredUsers list
-        async for document in postUserCollection.find({"userId": {"$in": filteredUsers}, "updatedAt": {"$lte": fromDate}}):
-            results.append(document)
+    startDateFrom = fromDate
 
-    else:
-        # Find documents where userId is in the filteredUsers list along with from date
-        async for document in postUserCollection.find({"userId": {"$in": filteredUsers}}):
-            results.append(document)
+    if startDateFrom is None:
+        startDateFrom = datetime.utcnow()
+
+    # Perform the aggregation
+    pipeline = [
+        {"$match": {"userId": {"$in": filteredUsers},
+                    "updatedAt": {"$lte": startDateFrom}}},
+        {"$sort": {"updatedAt": 1}},  # Sort by date ascending
+        {"$limit": 10}  # Limit to 10 records
+    ]
+
+    # fetch tweets or filter tweets
+    async for document in postUserCollection.aggregate(pipeline):
+        results.append(document)
 
     print(results)
 
@@ -89,7 +96,9 @@ async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
             "imageURL": post_info["imageURL"],
             "owner": post_user_info["name"],
             "avatarURL": post_user_info["avatarURL"],
-            "userId": pu["userId"]
+            "userId": pu["userId"],
+            "createdAt": post_info["createdAt"],
+            "updatedAt": post_info["updatedAt"]
         }
 
         metaData.append(data)
@@ -102,7 +111,7 @@ async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
 
 # Post a new Tweet
 @router.post("/create")
-async def post_tweet(tweet_payload: NewTweetPayload, request: Request):
+async def post_tweet(tweet_payload: NewTweetPayload, request: Request, background_tasks: BackgroundTasks):
     # fetch userId from jwt
     access_token = request.headers.get('Authorization')
     print(access_token)
@@ -147,7 +156,13 @@ async def post_tweet(tweet_payload: NewTweetPayload, request: Request):
         userId=userId
     )
 
-    await postUserCollection.insert_one(new_post_user.dict())
+    post_user_result = await postUserCollection.insert_one(new_post_user.dict())
+    post_user_id = str(post_user_result.inserted_id)
+    print(post_user_id)
+    # add post into your followers time line
+    # Adding the background task
+    background_tasks.add_task(
+        add_users_timeline, userId, post_user_id)
 
     response = {
         "success": True,

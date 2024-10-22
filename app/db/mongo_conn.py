@@ -14,3 +14,4 @@ userCollection = db.users
 userCircleCollection = db.userCircles
 postCollection = db.posts
 postUserCollection = db.postUsers
+timelineCollection = db.timeline
