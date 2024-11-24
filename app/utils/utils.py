@@ -1,7 +1,9 @@
 import bcrypt
+from fastapi import Request, HTTPException, status
 from datetime import datetime, timedelta
 from app.models.auth import TokenData
 from jose import JWTError, jwt
+from const.errors import unauthorized_exception
 
 
 def hash_password(password):
@@ -42,3 +44,11 @@ def verify_token(token: str, credentials_exception):
     except JWTError:
         raise credentials_exception
     return token_data
+
+
+def get_current_user(request: Request):
+    authorization: str = request.headers.get("Authorization")
+    if not authorization:
+        raise unauthorized_exception
+    token = authorization.split(" ")[1]
+    return verify_token(token, unauthorized_exception)

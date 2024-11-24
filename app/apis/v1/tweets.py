@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request, HTTPException, status, BackgroundTasks
 from app.models.tweet import NewTweetPayload, Post, PostUser, TweetFeedPayload
 from app.models.user import UserCircle
 from app.utils.async_process import add_users_timeline
-from app.utils.utils import verify_token
+from app.utils.utils import get_current_user, verify_token
 from bson import ObjectId
 from datetime import datetime
 
@@ -17,20 +17,8 @@ router = APIRouter()
 @router.post("/")
 async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
     # fetch userId from jwt
-    access_token = request.headers.get('Authorization')
-    print(access_token)
-    access_token = access_token.split(" ")
 
-    # HTTPException Error response format
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    print(access_token[1])
-
-    token_data = verify_token(access_token[1], credentials_exception)
+    token_data = get_current_user(request)
 
     if token_data is None:
         return {
@@ -50,13 +38,15 @@ async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
         if tweet_feed_payload.fromDate is not None:
             fromDate = tweet_feed_payload.fromDate
 
-    filteredUsers = [userId]
+    filteredUsers = [userId]  # search feeds of list of filtered users
     results = []
 
     # if search by user
     if searchUserFeed is not None:
+        # list feeds of specific user
         filteredUsers = [searchUserFeed]
     else:
+        # list feeds of all following users including you.
         user_circle = await userCircleCollection.find_one({"userId": userId})
         following_userIds = user_circle["following"]
         filteredUsers.extend(following_userIds)
@@ -70,6 +60,7 @@ async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
 
     # Perform the aggregation
     pipeline = [
+        # match userId of filteredUsers along with updatedAt (less than startDateFrom)
         {"$match": {"userId": {"$in": filteredUsers},
                     "updatedAt": {"$lte": startDateFrom}}},
         {"$sort": {"updatedAt": 1}},  # Sort by date ascending
@@ -81,6 +72,13 @@ async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
         results.append(document)
 
     print(results)
+
+    if not results:
+        return {
+            "success": True,
+            "is_last_post": True,
+            "results": []
+        }
 
     metaData = []
     for pu in results:
@@ -109,24 +107,30 @@ async def get_tweets(tweet_feed_payload: TweetFeedPayload, request: Request):
     }
 
 
+# # Fetch Posts timeline
+# @router.post("/feed")
+# async def tweets_feed(tweet_feed_payload: TweetFeedPayload, request: Request):
+#     # fetch userId from jwt
+
+#     token_data = get_current_user(request)
+
+#     if token_data is None:
+#         return {
+#             "success": False,
+#             "msg": "Token is invalid or expired."
+#         }
+
+#     userId = token_data.userId
+
+#     searchUserFeed = None
+#     fromDate = None
+
+
 # Post a new Tweet
 @router.post("/create")
 async def post_tweet(tweet_payload: NewTweetPayload, request: Request, background_tasks: BackgroundTasks):
     # fetch userId from jwt
-    access_token = request.headers.get('Authorization')
-    print(access_token)
-    access_token = access_token.split(" ")
-
-    # HTTPException Error response format
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
-    print(access_token[1])
-
-    token_data = verify_token(access_token[1], credentials_exception)
+    token_data = get_current_user(request)
 
     if token_data is None:
         return {

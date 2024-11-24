@@ -1,0 +1,4 @@
+
+- caching posts
+    - store every post along with user info into redis of last 24hrs.
+    - store postuser collection in redis
